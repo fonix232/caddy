@@ -16,9 +16,6 @@ CUSTOM_TAG_PREFIX = ""
 REQUIRED_PLATFORMS = {
     "linux/amd64",
     "linux/arm64",
-    "linux/arm/v7",
-    "linux/ppc64le",
-    "linux/s390x",
 }
 
 def log_error(message):
@@ -116,6 +113,36 @@ def check_docker_hub_tag(image_name, tag):
         log_error(f"Error decoding Docker Hub API response for tag '{tag}' of '{image_name}': {e}. Response: {response.text[:200]}")
         return None
 
+def check_ghcr_tag(image_name, tag, token=None):
+    """Checks if a specific tag exists for a GHCR.io. Returns tag data or None."""
+    url = f"https://ghcr.io/v2/{image_name}/manifests/{tag}"
+    if not token:
+        log_error("GITHUB_TOKEN environment variable not set.")
+        return None
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.oci.image.manifest.v1+json"
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        elif response.status_code == 404:
+            return None
+        else:
+            log_error(f"Unexpected status {response.status_code} checking GHCR.io tag '{tag}' for '{image_name}'. Response: {response.text[:200]}")
+            return None
+    except requests.exceptions.Timeout:
+        log_error(f"Timeout checking GHCR.io tag '{tag}' for '{image_name}' at {url}")
+        return None
+    except requests.exceptions.RequestException as e:
+        log_error(f"Network error checking GHCR.io tag '{tag}' for '{image_name}': {e}")
+        return None
+    except json.JSONDecodeError as e:
+        log_error(f"Error decoding GHCR.io API response for tag '{tag}' of '{image_name}': {e}. Response: {response.text[:200]}")
+        return None
+
 
 
 def get_platforms_from_tag_data(tag_data):
@@ -149,6 +176,7 @@ def get_platforms_from_tag_data(tag_data):
 
 def main():
     start_time = datetime.now(timezone.utc)
+    github_token = os.environ["GITHUB_TOKEN"]
     log_info(f"--- Starting Caddy Check at {start_time.isoformat()} ---")
 
     if not REQUIRED_PLATFORMS:
@@ -203,6 +231,24 @@ def main():
     else:
         log_info(f"  Custom image tag '{custom_docker_tag}' NOT found.")
 
+    should_check_ghcr = not custom_image_complete and github_token
+
+    if not custom_image_complete:
+        log_info(f"  Custom image not found on Docker Hub. Checking GHCR.io...")
+        custom_ghcr_data = check_ghcr_tag(CUSTOM_IMAGE, custom_docker_tag, github_token)
+        if custom_ghcr_data:
+            log_info(f"  Custom image tag '{custom_docker_tag}' found on GHCR.io. Verifying platforms...")
+            found_custom_platforms = get_platforms_from_tag_data(custom_ghcr_data)
+            log_info(f"  Found custom platforms relevant to requirements: {found_custom_platforms or '{}'}")
+            required_platforms_missing_in_custom = REQUIRED_PLATFORMS - found_custom_platforms
+            if not required_platforms_missing_in_custom:
+                custom_image_complete = True
+                log_info(f"  Custom image on GHCR.io is complete.")
+            else:
+                log_info(f"  Custom image on GHCR.io is MISSING required platforms: {required_platforms_missing_in_custom}.")
+        else:
+            log_info(f"  Custom image tag '{custom_docker_tag}' NOT found on GHCR.io.")
+    
     # 3. Decide if a build is needed (Official is ready AND custom is incomplete/missing)
     needs_build = not custom_image_complete
 
