@@ -116,6 +116,10 @@ def check_docker_hub_tag(image_name, tag):
         log_error(f"Error decoding Docker Hub API response for tag '{tag}' of '{image_name}': {e}. Response: {response.text[:200]}")
         return None
 
+def check_ghcr_tag(image_name, tag):
+    """Checks if a specific tag exists for a GHCR.io. Returns tag data or None."""
+    url = f"https://"
+
 
 
 def get_platforms_from_tag_data(tag_data):
