@@ -9,6 +9,10 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   check_and_trigger:
     name: Check Caddy Release and Trigger Build if Needed
@@ -38,6 +42,7 @@ jobs:
         id: check_script
         env:
           DOCKERHUB_REPOSITORY_NAME: ${{ env.DOCKERHUB_REPOSITORY_NAME }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python scripts/check_caddy_status.py
 
       - name: Trigger Build Workflow if Needed
