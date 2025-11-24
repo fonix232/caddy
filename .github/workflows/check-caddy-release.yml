@@ -9,12 +9,17 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+  packages: read
+
 jobs:
   check_and_trigger:
     name: Check Caddy Release and Trigger Build if Needed
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: read
 
     steps:
       - name: Checkout
@@ -38,27 +43,35 @@ jobs:
         id: check_script
         env:
           DOCKERHUB_REPOSITORY_NAME: ${{ env.DOCKERHUB_REPOSITORY_NAME }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python scripts/check_caddy_status.py
 
       - name: Trigger Build Workflow if Needed
         # Run this step ONLY if the script output NEEDS_BUILD is 'true'
         if: steps.check_script.outputs.NEEDS_BUILD == 'true'
         uses: actions/github-script@v7
+        env:
+          SHOULD_RUN_WORKFLOW: ${{ vars.SHOULD_RUN_WORKFLOW || secrets.SHOULD_RUN_WORKFLOW }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const version = '${{ steps.check_script.outputs.LATEST_VERSION }}';
-            console.log(`Build required for Caddy version: ${version}. Dispatching event...`);
+            const shouldRun = process.env.SHOULD_RUN_WORKFLOW;
+            console.log(`Build required for Caddy version: ${version}. Should run: ${shouldRun}`);
             try {
-              await github.rest.repos.createDispatchEvent({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                event_type: 'caddy-release',
-                client_payload: {
-                  caddy_version: version // Pass the tag (e.g., "v2.9.1")
-                }
-              });
-              console.log(`Successfully dispatched event for ${version}.`);
+              if (shouldRun === 'true') {
+                await github.rest.repos.createDispatchEvent({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  event_type: 'caddy-release',
+                  client_payload: {
+                    caddy_version: version // Pass the tag (e.g., "v2.9.1")
+                  }
+                });
+                console.log(`Successfully dispatched event for ${version}.`);
+              } else {
+                console.log(`Skipping workflow dispatch (SHOULD_RUN_WORKFLOW=${shouldRun}).`);
+              }
             } catch (error) {
               core.setFailed(`Failed to dispatch event: ${error.message}`);
             }
