@@ -3,6 +3,7 @@ import requests
 import sys
 import json
 import uuid
+import subprocess
 from datetime import datetime, timezone
 
 # --- Configuration ---
@@ -250,6 +251,36 @@ def get_platforms_from_tag_data(tag_data):
 
     return platforms
 
+def get_git_commit_sha():
+    """Gets the current git commit short SHA (7 characters)."""
+    try:
+        result = subprocess.run(
+            ['git', 'rev-parse', '--short=7', 'HEAD'],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10
+        )
+        commit_sha = result.stdout.strip()
+        if commit_sha:
+            log_info(f"Current git commit SHA: {commit_sha}")
+            return commit_sha
+        else:
+            log_error("Git command returned empty commit SHA")
+            sys.exit(1)
+    except subprocess.TimeoutExpired:
+        log_error("Timeout getting git commit SHA")
+        sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        log_error(f"Git command failed: {e.stderr}")
+        sys.exit(1)
+    except FileNotFoundError:
+        log_error("Git command not found. Ensure git is installed and in PATH.")
+        sys.exit(1)
+    except Exception as e:
+        log_error(f"Unexpected error getting git commit SHA: {e}")
+        sys.exit(1)
+
 def main():
     start_time = datetime.now(timezone.utc)
     github_token = os.environ.get("GITHUB_TOKEN")
@@ -266,9 +297,19 @@ def main():
     
     log_info(f"Required platforms: {REQUIRED_PLATFORMS}")
 
-    latest_gh_tag = get_latest_caddy_release(github_token)
+    latest_gh_tag = get_latest_caddy_release()
     official_docker_tag = latest_gh_tag.lstrip('v')
-    custom_docker_tag = f"{CUSTOM_TAG_PREFIX}{official_docker_tag}"
+    
+    # Get current git commit SHA for custom build tracking
+    commit_sha = get_git_commit_sha()
+    
+    # Custom tag format: {CADDY_VERSION}-{COMMIT_SHA}
+    custom_docker_tag = f"{CUSTOM_TAG_PREFIX}{official_docker_tag}-{commit_sha}"
+    # Legacy tag format for backward compatibility: {CADDY_VERSION}
+    legacy_docker_tag = f"{CUSTOM_TAG_PREFIX}{official_docker_tag}"
+    
+    log_info(f"Custom image tag (new format): {custom_docker_tag}")
+    log_info(f"Legacy image tag (old format): {legacy_docker_tag}")
 
     # 1. Check if the official Caddy image tag exists AND has required platforms
     log_info(f"Step 1: Checking official image '{OFFICIAL_CADDY_IMAGE}:{official_docker_tag}'...")
@@ -294,18 +335,26 @@ def main():
         log_info("Result: Official image is not ready. No build triggered.")
         set_action_output('NEEDS_BUILD', 'false') 
         set_action_output('LATEST_VERSION', latest_gh_tag)
+        set_action_output('CUSTOM_TAG', custom_docker_tag)
+        set_action_output('COMMIT_SHA', commit_sha)
         sys.exit(0)
 
     # 2. Check custom image on configured registry
-    log_info(f"Step 2: Checking custom image '{CUSTOM_IMAGE}:{custom_docker_tag}' on {CUSTOM_REGISTRY.upper()}...")
+    # Check both new format (with commit) and legacy format (without commit) for backward compatibility
+    log_info(f"Step 2: Checking custom image on {CUSTOM_REGISTRY.upper()}...")
     custom_image_complete = False
-
+    
     if CUSTOM_REGISTRY == 'dockerhub':
-        custom_tag_data = check_docker_hub_tag(CUSTOM_IMAGE, custom_docker_tag)
         registry_name = "Docker Hub"
     else:  # ghcr
-        custom_tag_data = check_ghcr_tag(CUSTOM_IMAGE, custom_docker_tag, github_token)
         registry_name = "GHCR.io"
+    
+    # Try new format first: {VERSION}-{COMMIT}
+    log_info(f"  Checking new format tag '{custom_docker_tag}'...")
+    if CUSTOM_REGISTRY == 'dockerhub':
+        custom_tag_data = check_docker_hub_tag(CUSTOM_IMAGE, custom_docker_tag)
+    else:  # ghcr
+        custom_tag_data = check_ghcr_tag(CUSTOM_IMAGE, custom_docker_tag, github_token)
 
     if custom_tag_data:
         log_info(f"  Custom image tag '{custom_docker_tag}' found on {registry_name}. Verifying platforms...")
@@ -320,13 +369,33 @@ def main():
             log_info(f"  Custom image on {registry_name} exists but is MISSING required platforms: {required_platforms_missing_in_custom}.")
     else:
         log_info(f"  Custom image tag '{custom_docker_tag}' NOT found on {registry_name}.")
+        log_info(f"  Build needed: commit-specific tag does not exist.")
+        
+        # Check legacy format for informational purposes only
+        log_info(f"  Checking legacy format tag '{legacy_docker_tag}' (informational only)...")
+        
+        if CUSTOM_REGISTRY == 'dockerhub':
+            legacy_tag_data = check_docker_hub_tag(CUSTOM_IMAGE, legacy_docker_tag)
+        else:  # ghcr
+            legacy_tag_data = check_ghcr_tag(CUSTOM_IMAGE, legacy_docker_tag, github_token)
+        
+        if legacy_tag_data:
+            found_legacy_platforms = get_platforms_from_tag_data(legacy_tag_data)
+            if REQUIRED_PLATFORMS - found_legacy_platforms:
+                log_info(f"  Note: Legacy tag '{legacy_docker_tag}' exists but is incomplete.")
+            else:
+                log_info(f"  Note: Legacy tag '{legacy_docker_tag}' exists and is complete, but new commit-specific build is still needed.")
+        else:
+            log_info(f"  Note: Legacy tag '{legacy_docker_tag}' does not exist either.")
     
     # 3. Decide if a build is needed
     needs_build = not custom_image_complete
 
-    log_info(f"Step 3: Final decision for Caddy {latest_gh_tag}: Needs build = {needs_build}")
+    log_info(f"Step 3: Final decision for Caddy {latest_gh_tag} with commit {commit_sha}: Needs build = {needs_build}")
     set_action_output('NEEDS_BUILD', 'true' if needs_build else 'false') 
-    set_action_output('LATEST_VERSION', latest_gh_tag) 
+    set_action_output('LATEST_VERSION', latest_gh_tag)
+    set_action_output('CUSTOM_TAG', custom_docker_tag)
+    set_action_output('COMMIT_SHA', commit_sha)
 
     end_time = datetime.now(timezone.utc)
     log_info(f"--- Check finished at {end_time.isoformat()} (Duration: {end_time - start_time}) ---")

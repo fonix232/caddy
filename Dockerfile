@@ -2,16 +2,9 @@
 ARG CADDY_VERSION
 FROM caddy:${CADDY_VERSION}-builder AS builder
 
-# Build Caddy with all my needed modules
-RUN xcaddy build \
-    --with github.com/caddy-dns/cloudflare \
-    --with github.com/WeidiDeng/caddy-cloudflare-ip \
-    --with github.com/fvbommel/caddy-combine-ip-ranges \
-    --with github.com/greenpau/caddy-security \
-    --with github.com/mholt/caddy-l4 \
-    --with github.com/caddyserver/transform-encoder \
-    --with github.com/hslatman/caddy-crowdsec-bouncer/http@main \
-    --with github.com/hslatman/caddy-crowdsec-bouncer/layer4@main
+# Copy and run the shared build script
+COPY scripts/build-caddy.sh /tmp/build-caddy.sh
+RUN chmod +x /tmp/build-caddy.sh && /tmp/build-caddy.sh
 
 # Final stage
 FROM caddy:${CADDY_VERSION}

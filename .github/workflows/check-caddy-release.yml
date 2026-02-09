@@ -3,7 +3,13 @@ name: Check Caddy Releases and Trigger Build
 on:
   schedule:
     - cron: '0 0 * * *'
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force a new build regardless of existing images'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}
@@ -39,12 +45,27 @@ jobs:
         env:
           DOCKERHUB_REPOSITORY_NAME: ${{ vars.DOCKERHUB_REPOSITORY_NAME || secrets.DOCKERHUB_REPOSITORY_NAME }}
 
-      - name: Check Caddy release status (GitHub & Docker Hub)
+      - name: Check Caddy release status or force build
         id: check_script
         env:
           DOCKERHUB_REPOSITORY_NAME: ${{ env.DOCKERHUB_REPOSITORY_NAME }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python scripts/check_caddy_status.py
+        run: |
+          if [[ "${{ inputs.force_build }}" == "true" ]]; then
+            echo "Force build requested - skipping registry check"
+            echo "NEEDS_BUILD=true" >> $GITHUB_OUTPUT
+            
+            # Still get version info but force build
+            LATEST_VERSION=$(curl -s https://api.github.com/repos/caddyserver/caddy/releases/latest | jq -r .tag_name)
+            COMMIT_SHA=$(git rev-parse --short=7 HEAD)
+            CUSTOM_TAG="${LATEST_VERSION#v}-${COMMIT_SHA}"
+            
+            echo "LATEST_VERSION=${LATEST_VERSION}" >> $GITHUB_OUTPUT
+            echo "CUSTOM_TAG=${CUSTOM_TAG}" >> $GITHUB_OUTPUT
+            echo "COMMIT_SHA=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          else
+            python scripts/check_caddy_status.py
+          fi
 
       - name: Trigger Build Workflow if Needed
         # Run this step ONLY if the script output NEEDS_BUILD is 'true'
@@ -56,8 +77,17 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const version = '${{ steps.check_script.outputs.LATEST_VERSION }}';
+            const customTag = '${{ steps.check_script.outputs.CUSTOM_TAG }}';
+            const commitSha = '${{ steps.check_script.outputs.COMMIT_SHA }}';
             const shouldRun = process.env.SHOULD_RUN_WORKFLOW;
-            console.log(`Build required for Caddy version: ${version}. Should run: ${shouldRun}`);
+            const forceBuild = '${{ inputs.force_build }}' === 'true';
+            
+            console.log(`Build required for Caddy version: ${version}`);
+            console.log(`Custom tag: ${customTag}`);
+            console.log(`Commit SHA: ${commitSha}`);
+            console.log(`Force build: ${forceBuild}`);
+            console.log(`Should run: ${shouldRun}`);
+            
             try {
               if (shouldRun === 'true') {
                 await github.rest.repos.createDispatchEvent({
@@ -65,10 +95,13 @@ jobs:
                   repo: context.repo.repo,
                   event_type: 'caddy-release',
                   client_payload: {
-                    caddy_version: version // Pass the tag (e.g., "v2.9.1")
+                    caddy_version: version,
+                    custom_tag: customTag,
+                    commit_sha: commitSha,
+                    force_build: forceBuild
                   }
                 });
-                console.log(`Successfully dispatched event for ${version}.`);
+                console.log(`Successfully dispatched event for ${version} (${customTag}).`);
               } else {
                 console.log(`Skipping workflow dispatch (SHOULD_RUN_WORKFLOW=${shouldRun}).`);
               }
