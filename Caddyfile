@@ -1,6 +1,4 @@
 {
-  acme_dns cloudflare {env.CLOUDFLARE_API_TOKEN}
-  
   # Import additional global options
   import /conf/Caddyfile.d/global/*.caddy
 }
