@@ -11,4 +11,5 @@ xcaddy build \
     --with github.com/caddyserver/transform-encoder \
     --with github.com/hslatman/caddy-crowdsec-bouncer/http@main \
     --with github.com/hslatman/caddy-crowdsec-bouncer/layer4@main \
-    --with github.com/mholt/caddy-events-exec
+    --with github.com/mholt/caddy-events-exec \
+    --with github.com/lucaslorentz/caddy-docker-proxy/v2

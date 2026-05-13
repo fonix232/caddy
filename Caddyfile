@@ -1,7 +1,0 @@
-{
-  # Import additional global options
-  import /conf/Caddyfile.d/global/*.caddy
-}
-
-# Then import site definitions separately
-import /conf/Caddyfile.d/sites/*.caddy

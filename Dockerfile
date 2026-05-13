@@ -11,4 +11,5 @@ FROM caddy:${CADDY_VERSION}
 
 # Copy the custom-built Caddy binary
 COPY --from=builder /usr/bin/caddy /usr/bin/caddy
-COPY Caddyfile /etc/caddy/Caddyfile
+
+CMD ["caddy", "docker-proxy"]
