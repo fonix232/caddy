@@ -3,7 +3,13 @@ name: Check Caddy Releases and Trigger Build
 on:
   schedule:
     - cron: '0 0 * * *'
-  workflow_dispatch: # Allows manual triggering
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: 'Force a new build regardless of existing images'
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}
@@ -15,6 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: read
 
     steps:
       - name: Checkout
@@ -28,12 +35,24 @@ jobs:
       - name: Install Python dependencies
         run: pip install requests
 
-      - name: Check Caddy release status and module updates
+      - name: Check Caddy release status or force build
         id: check_script
         env:
           DOCKERHUB_REPOSITORY_NAME: ${{ vars.DOCKERHUB_REPOSITORY_NAME || secrets.DOCKERHUB_REPOSITORY_NAME }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python -m check_caddy_status
+          REQUIRED_PLATFORMS: ${{ vars.REQUIRED_PLATFORMS }}
+          CADDY_EXTRA_MODULES: ${{ vars.CADDY_EXTRA_MODULES }}
+          CADDY_REGISTRY: ${{ vars.CADDY_REGISTRY }}
+        run: |
+          if [[ "${{ inputs.force_build }}" == "true" ]]; then
+            echo "Force build requested - skipping registry check"
+            echo "NEEDS_BUILD=true" >> $GITHUB_OUTPUT
+            LATEST_VERSION=$(curl -s https://api.github.com/repos/caddyserver/caddy/releases/latest | jq -r .tag_name)
+            echo "LATEST_VERSION=${LATEST_VERSION}" >> $GITHUB_OUTPUT
+            echo "BUILD_REASON=forced" >> $GITHUB_OUTPUT
+          else
+            python -m check_caddy_status
+          fi
         working-directory: scripts
 
       - name: Commit updated module versions

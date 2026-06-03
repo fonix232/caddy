@@ -9,7 +9,7 @@ import argparse
 import sys
 from datetime import datetime, timezone
 
-from .config import CUSTOM_IMAGE, GHCR_IMAGE, OFFICIAL_CADDY_IMAGE, REQUIRED_PLATFORMS
+from .config import CADDY_REGISTRY, CUSTOM_IMAGE, GHCR_IMAGE, OFFICIAL_CADDY_IMAGE, REQUIRED_PLATFORMS
 from .docker_hub import check_docker_hub_tag, get_platforms_from_tag_data
 from .ghcr import check_ghcr_tag
 from .github_api import get_latest_caddy_release
@@ -113,12 +113,21 @@ def _check_official_image(docker_tag):
 
 
 def _check_custom_image(docker_tag):
-    """Returns True if the custom image exists with all platforms on GHCR or Docker Hub."""
+    """Returns True if the custom image exists with all required platforms.
+
+    Which registries are checked is controlled by CADDY_REGISTRY:
+      'ghcr'      — GHCR only
+      'dockerhub' — Docker Hub only
+      'both'      — GHCR primary, Docker Hub secondary/fallback (default)
+    """
+    check_ghcr = CADDY_REGISTRY in ("ghcr", "both")
+    check_dh = CADDY_REGISTRY in ("dockerhub", "both")
+
     custom_complete = False
     ghcr_result = None
 
-    # GHCR (primary)
-    if GHCR_IMAGE:
+    # GHCR
+    if check_ghcr:
         log.info(f"  Checking GHCR: ghcr.io/{GHCR_IMAGE}:{docker_tag}")
         ghcr_result, ghcr_data = check_ghcr_tag(GHCR_IMAGE, docker_tag)
 
@@ -138,11 +147,10 @@ def _check_custom_image(docker_tag):
             log.warn(f"  GHCR check failed: {ghcr_data}")
             log.set_summary("Custom (GHCR)", f"Error: {ghcr_data}")
     else:
-        log.info("  GHCR image not configured, skipping.")
-        log.set_summary("Custom (GHCR)", "Not configured")
+        log.set_summary("Custom (GHCR)", "Skipped")
 
-    # Docker Hub (secondary)
-    if CUSTOM_IMAGE:
+    # Docker Hub
+    if check_dh:
         log.info(f"  Checking Docker Hub: {CUSTOM_IMAGE}:{docker_tag}")
         dh_result, dh_data = check_docker_hub_tag(CUSTOM_IMAGE, docker_tag)
 
@@ -152,10 +160,9 @@ def _check_custom_image(docker_tag):
             if not dh_missing:
                 log.info("  Docker Hub image complete.")
                 log.set_summary("Custom (Docker Hub)", "Complete")
-                # Fallback if GHCR errored
-                if not custom_complete and ghcr_result == TagCheckResult.ERROR:
+                # In 'both' mode, use Docker Hub as fallback only if GHCR errored
+                if CADDY_REGISTRY == "dockerhub" or (not custom_complete and ghcr_result == TagCheckResult.ERROR):
                     custom_complete = True
-                    log.info("  Using Docker Hub as fallback (GHCR errored).")
             else:
                 log.info(f"  Docker Hub image missing: {dh_missing}")
                 log.set_summary("Custom (Docker Hub)", f"Missing: {dh_missing}")
@@ -165,8 +172,7 @@ def _check_custom_image(docker_tag):
         else:
             log.set_summary("Custom (Docker Hub)", f"Error: {dh_data}")
     else:
-        log.info("  Docker Hub image not configured, skipping.")
-        log.set_summary("Custom (Docker Hub)", "Not configured")
+        log.set_summary("Custom (Docker Hub)", "Skipped")
 
     return custom_complete
 

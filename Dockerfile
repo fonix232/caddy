@@ -2,11 +2,21 @@
 ARG CADDY_VERSION
 FROM caddy:${CADDY_VERSION}-builder AS builder
 
-# Build Caddy with the Cloudflare DNS module
-RUN xcaddy build \
-    --with github.com/caddy-dns/cloudflare \
-    --with github.com/WeidiDeng/caddy-cloudflare-ip \
-    --with github.com/fvbommel/caddy-combine-ip-ranges
+ARG CADDY_EXTRA_MODULES=""
+RUN set -e; \
+    extra_with=""; \
+    if [ -n "$CADDY_EXTRA_MODULES" ]; then \
+        old_ifs="$IFS"; IFS=','; \
+        for spec in $CADDY_EXTRA_MODULES; do \
+            extra_with="$extra_with --with $spec"; \
+        done; \
+        IFS="$old_ifs"; \
+    fi; \
+    xcaddy build \
+        --with github.com/caddy-dns/cloudflare \
+        --with github.com/WeidiDeng/caddy-cloudflare-ip \
+        --with github.com/fvbommel/caddy-combine-ip-ranges \
+        $extra_with
 
 # Final stage
 FROM caddy:${CADDY_VERSION}
