@@ -1,9 +1,11 @@
 # Build stage
-ARG CADDY_VERSION
+ARG CADDY_VERSION=latest
 FROM caddy:${CADDY_VERSION}-builder AS builder
 
 ARG CADDY_EXTRA_MODULES=""
-RUN set -e; \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    set -e; \
     extra_with=""; \
     if [ -n "$CADDY_EXTRA_MODULES" ]; then \
         old_ifs="$IFS"; IFS=','; \
