@@ -18,6 +18,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
         --with github.com/caddy-dns/cloudflare \
         --with github.com/WeidiDeng/caddy-cloudflare-ip \
         --with github.com/fvbommel/caddy-combine-ip-ranges \
+        --with github.com/caddyserver/replace-response \
         $extra_with
 
 # Final stage
